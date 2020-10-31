@@ -1,29 +1,29 @@
 %GENERATE generate particle images
 
 close all; clear; clc; drawnow
-fontsize = 26;
+fontsize = 24;
 fontname = 'Times New Roman';
 
 %% parameter setting
-img_size=512; % image size, e.g. 512x512
+img_size=512;                        % image size, e.g. 512x512
 rho=0.6;
-rho_wall = 0.06;
-particle_num=round(img_size^2*rho); % num of particles
+rho_wall = 0.03;
+particle_num=round(img_size^2*rho);  % num of particles
 wall_num=round(img_size^2*rho_wall); % num of particles on the wall
-z0=0.333;    % light sheet thickness
-z_move=10;   % out-of-plane-movement when generating intensity distribution in z direction
-dp=2;        % particle diameter: unit: pixel
-ddp=dp/2;    % particle diameter variation: unit: pixel
+z0=0.333;                            % light sheet thickness
+z_move=10;                           % out-of-plane-movement when generating intensity distribution in z direction
+dp=2;                                % particle diameter: unit: pixel
+ddp=dp/2;                            % particle diameter variation: unit: pixel
 sizey=img_size; 
 sizex=img_size;
-delta_x = 0.5;                 % length of partial airfoil
-thick_y = sizey/sizex*delta_x; % velocity field thickness
-chord = 1;
-level = 2^16-1; % uint16
-noise_mag = level/1000; % noise magnitude
-angle = 10;
-flag = 1; % flag = 1 means y >= 0 and flag = 0 means y < 0
-offset_ratio = 2; % pixel/m
+delta_x = 0.3;                       % length of chosen part of aerofoil
+thick_y = sizey/sizex*delta_x;       % velocity field thickness
+level = 2^16-1;                      % uint16
+noise_mag = level/1000;              % noise magnitude
+angle = 10;                          % rotation angle
+flag = 0;                            % flag = 1 means y >= 0 and flag = 0 means y < 0
+offset_ratio = 2;                    % 1m length in real world means offset_ratio pixel in image
+
 %% load and show aerofoil and velocity field
 % show aerofoil and velocity field
 afoil = importdata('naca4412 aerofoil.txt','\t',1);
@@ -35,27 +35,27 @@ f = figure('Name','Aerofoil and Velocity'); figure(f)
 plot(afoil_x,afoil_y); axis image
 hold on; quiver(field_x,field_y,field_u,field_v,'g','AutoScaleFactor',0.5); hold off
 xlabel('x'); ylabel('y'); title('all'); xlim([-7 15]); ylim([-7 7])
-set(gcf,'position',get(0,'ScreenSize')); set(gca,'FontName','Times New Roman','FontSize',26)
+set(gcf,'position',get(0,'ScreenSize')); set(gca,'FontName',fontname,'FontSize',fontsize)
 saveas(gcf,'img/all_flow_field','png');
 
 % show part of the aerofoil and velocity field
-end_x = delta_x + (chord-delta_x)*rand;
+chord = 1;
+end_x = delta_x + (chord-delta_x)*rand; % randomly choose part of aerofoil
 start_x = end_x - delta_x;
+
 partfield_idx = field_x >= start_x & field_x <= end_x;
 partfoil_idx = afoil_x >= start_x & afoil_x <= end_x;
-% choose points in region of interest
-if flag == 1
+if flag == 1 % the upper part of aerofoil
     partfield_idx = partfield_idx & field_y >= 0 & field_y <= thick_y;
     afoil_idx = afoil_y >= 0;
-    partfoil_idx = partfoil_idx & afoil_idx;   
-elseif flag == 0
+    partfoil_idx = partfoil_idx & afoil_idx;
+elseif flag == 0 % the upper part of aerofoil
     thick_y = -thick_y;
     partfield_idx = partfield_idx & field_y < 0 & field_y >= thick_y;
     afoil_idx = afoil_y < 0;
     partfoil_idx = partfoil_idx & afoil_idx;
-else
-    fprintf('Y Range Error');
 end
+
 afoil_interp_x = afoil_x(afoil_idx);
 afoil_interp_y = afoil_y(afoil_idx);
 [afoil_interp_x,I] = sort(afoil_interp_x); % The grid vectors must be strictly monotonically increasing when using griddedInterpolant
@@ -70,11 +70,12 @@ elseif flag == 0
     afoil_xoi = [start_x,afoil_x(partfoil_idx)',end_x];
     afoil_yoi = [start_y,afoil_y(partfoil_idx)',end_y];
 end
+% part of flow field
 part_x = field_x(partfield_idx); part_y = field_y(partfield_idx);
 part_u = field_u(partfield_idx); part_v = field_v(partfield_idx);
-% real distance
+
 min_x = start_x;  max_x = end_x;
-min_y = min(0,thick_y); max_y = max(0,thick_y);
+min_y = min(0, thick_y); max_y = max(0, thick_y);
 f = figure('Name','Part of Aerofoil'); figure(f)
 plot(afoil_xoi,afoil_yoi,'LineWidth',3); axis image
 hold on; quiver(part_x,part_y,part_u,part_v,'g','AutoScaleFactor',0.5); hold off
@@ -92,20 +93,29 @@ A=zeros(sizey,sizex); B=A;
 x0=min_x + rand(particle_num,1)*max_x;
 y_low_limit = F_afoil(x0);
 y0=y_low_limit+rand(particle_num,1).*(thick_y-y_low_limit);
+
 % transfer real-world coordinate to image coordinate using scaling and translation
 multiple = sizex / delta_x;
-afoil_x_img = afoil_xoi*multiple; afoil_y_img = afoil_yoi*multiple;
+afoil_x_img = afoil_xoi*multiple;
 x_move = min(afoil_x_img); % y need not to move
 afoil_x_img = afoil_x_img-x_move;
+x0 = x0*multiple-x_move;
+if flag == 1
+    afoil_y_img = afoil_yoi*multiple;
+    y0 = y0*multiple;
+elseif flag == 0
+    afoil_y_img = -afoil_yoi*multiple;
+    y0 = -y0*multiple;
+end    
 rd = -8.0 ./ d.^2;
-x0 = x0*multiple-x_move; y0 = y0*multiple;
+
 x_interp = linspace(min_x,max_x,sizex);
 y_interp = linspace(min_y,max_y,sizey);
 [X_interp,Y_interp] = ndgrid(x_interp,y_interp);
 [X,Y] = ndgrid(1:sizex,1:sizey);
 F_u = scatteredInterpolant(part_x,part_y,part_u,'linear','nearest');
 offsetx_real = F_u(X_interp,Y_interp);
-F_u = griddedInterpolant(X,Y,offsetx_real,'linear','nearest');
+F_u = griddedInterpolant(X,Y,offsetx_real,'linear','nearest'); % image coordinate
 offsetx = F_u(x0,y0);
 F_v = scatteredInterpolant(part_x,part_y,part_v,'linear','nearest');
 offsety_real = F_v(X_interp,Y_interp);
@@ -113,25 +123,24 @@ F_v = griddedInterpolant(X,Y,offsety_real,'linear','nearest');
 offsety = F_v(x0,y0);
 offsetx = offsetx*offset_ratio; offsety = offsety*offset_ratio;
 
-[xlimit1, xlimit2, ylimit1, ylimit2] = cal_extent(particle_num,x0,y0,d,sizex,sizey); % original image
+[xlimit1, xlimit2, ylimit1, ylimit2] = cal_extent(particle_num,x0,y0,d,sizex,sizey);                 % original image
 [xlimit3, xlimit4, ylimit3, ylimit4] = cal_extent(particle_num,x0,y0,d,sizex,sizey,offsetx,offsety); % shifted image
 
 ctr=0;
-for n=1:particle_num
+for n=1:particle_num % calculate grayscale of particle images
     ctr=ctr+1;
     if ctr==10000
         ctr=0;
         fprintf('.')
     end
     r = rd(n);
-    for j=xlimit1(n):xlimit2(n)
+    for j=xlimit1(n):xlimit2(n) % place particles with gaussian intensity profile
         for i=ylimit1(n):ylimit2(n)
             A(i,j)=A(i,j)+I0(n)*exp(((j-x0(n))^2+(i-y0(n))^2)*r);
         end
     end
     for j=xlimit3(n):xlimit4(n)
-        for i=ylimit3(n):ylimit4(n)
-            % place particle with gaussian intensity profile
+        for i=ylimit3(n):ylimit4(n)            
             B(i,j)=B(i,j)+I1(n)*exp(((j-x0(n)+offsetx(n))^2+(i-y0(n)+offsety(n))^2)*r); 
         end
     end
@@ -139,10 +148,14 @@ end
 %% add bright spots on the wall
 x_wall = min_x + rand(wall_num,1)*max_x;
 y_wall = F_afoil(x_wall);
+
 % coordinate transformation
 x_wall = x_wall*multiple-x_move; y_wall = y_wall*multiple;
-dy = 2; % pixel
-y_wall = y_wall + dy*rand(wall_num,1);
+dy = 2; % unit: pixel
+y_wall = y_wall + 2*dy*rand(wall_num,1)-dy;
+if flag == 0
+    y_wall = -y_wall;
+end 
 
 [I0, I1, d] = I_d(wall_num,z_move,level,dp,ddp,z0);
 [xlimit5, xlimit6, ylimit5, ylimit6] = cal_extent(wall_num,x_wall,y_wall,d,sizex,sizey); % original image
@@ -165,12 +178,15 @@ img_move=uint16(B);
 
 %% test synthetic images using PIV algorithm
 f = figure('Name','image1'); figure(f)
-% flip because different origins between image system and general system
-img_fixed_flip = uint16(flip(double(img_fixed)));
-img_move_flip = uint16(flip(double(img_move)));
-subplot(121); imshow(img_fixed_flip)
-subplot(122); imshow(img_move_flip)
-set(gcf, 'position', get(0,'ScreenSize')); saveas(gcf,'img/synthetic_image','png');
+if flag == 1 % different coordinates between image and real word, flipping
+    subplot(121); imshow(flip(img_fixed)); title('original image')
+    subplot(122); imshow(flip(img_move)); title('shifted image')
+elseif flag == 0
+    subplot(121); imshow(img_fixed); title('original image')
+    subplot(122); imshow(img_move); title('shifted image')
+end
+set(gca,'FontName',fontname,'FontSize',fontsize); set(gcf, 'position', get(0,'ScreenSize')); 
+saveas(gcf,'img/synthetic_image','png');
 
 [x,y,u,v] = PIV_test(img_move,img_fixed);
 F_u = scatteredInterpolant(x0,y0,offsetx,'linear','nearest');
@@ -179,11 +195,12 @@ F_v = scatteredInterpolant(x0,y0,offsety,'linear','nearest');
 v_real = F_v(x,y);
 
 f = figure('Name','result');figure(f);
-subplot(121); imshow(img_fixed); axis image;
+subplot(121); imshow(img_fixed); axis image; title('original image')
 hold on; quiver(x,y,u,v,'g','AutoScaleFactor',1); hold off; title('PIV result')
-subplot(122); imshow(img_fixed); axis image;
+subplot(122); imshow(img_fixed); axis image; title('shifted image')
 hold on; quiver(x,y,u_real,v_real,'g','AutoScaleFactor',1); hold off; title('real result')
-set(gcf, 'position', get(0,'ScreenSize')); saveas(gcf,'img/result','png');
+set(gca,'FontName',fontname,'FontSize',fontsize); set(gcf, 'position', get(0,'ScreenSize'));
+saveas(gcf,'img/result','png');
 
 f = figure('Name','Comparison between u');figure(f);
 u = u(:); u_real = u_real(:);
@@ -191,7 +208,7 @@ idx = ~isnan(u) & u_real ~= 0;
 u = u(idx); u_real = u_real(idx);
 plot(1:length(u),u,1:length(u_real),u_real,':');
 legend('PIV','Real'); xlabel('N'); ylabel('U'); title('Comparison between u')
-set(gcf,'position',get(0,'ScreenSize')); set(gca,'FontName','Times New Roman','FontSize',26)
+set(gca,'FontName',fontname,'FontSize',fontsize); set(gcf, 'position', get(0,'ScreenSize'));
 saveas(gcf,'img/result_comparison','png');
 
 % rotate effect
@@ -210,20 +227,17 @@ fprintf('\n\n');
 
 
 
-
 function [I0, I1, d] = I_d(num,z_move,level,dp,ddp,z0)
-%I_DISTRI generate intensity distribution in z direction and diameter
+%I_DISTRI generate intensity distribution in z direction and diameter distribution
 
     % the position of Z direction
     Z0_pre=randn(num,1);  % normal distributed sheet intensity
     Z1_pre=randn(num,1);  % normal distributed sheet intensity
     Z0=Z0_pre*(z_move/200+0.5)+Z1_pre*(1-(z_move/200+0.5));
     Z1=Z1_pre*(z_move/200+0.5)+Z0_pre*(1-(z_move/200+0.5));
-    % I0=65535*exp(-(Z^2./(0.125*z0.^2))); % particle intensity
-    I0=level*exp(-8*Z0.^2./z0^2); % The factor I0 is a function of the particle’s position Z, within the light sheet
-    I0(I0>level)=level; % uint16, 2^16-1
+    I0=level*exp(-8*Z0.^2./z0^2); % the factor I0 is a function of the particle’s position Z, within the light sheet
+    I0(I0>level)=level;           % uint16, 2^16-1
     I0(I0<0)=0;
-    % I1=65535*exp(-(Z^2./(0.125*z1.^2))); % particle intensity
     I1=level*exp(-8*Z1.^2./z0^2);
     I1(I1>level)=level;
     I1(I1<0)=0;
@@ -284,17 +298,17 @@ function [x,y,u,v] = PIV_test(img_fixed,img_move)
     s{13,1}='Correlation style';        s{13,2}=0;         % 0 or 1 : Use circular correlation (0) or linear correlation (1). 
     % Standard image preprocessing settings
     p = cell(8,1);
-    % Parameter                      % Setting          % Options
-    p{1,1}= 'ROI';                   p{1,2}=s{5,2};     % same as in PIV settings
-    p{2,1}= 'CLAHE';                 p{2,2}=1;          % 1 = enable CLAHE (contrast enhancement), 0 = disable
-    p{3,1}= 'CLAHE tile number';     p{3,2}=[8 8];      % CLAHE window size
-    p{4,1}= 'Highpass';              p{4,2}=0;          % 1 = enable highpass, 0 = disable
-    p{5,1}= 'Highpass size';         p{5,2}=15;         % highpass size
-    p{6,1}= 'Clipping';              p{6,2}=1;          % 1 = enable clipping, 0 = disable
-    p{7,1}= 'Wiener';                p{7,2}=0;          % 1 = enable Wiener2 adaptive denaoise filter, 0 = disable
-    p{8,1}= 'Wiener size';           p{8,2}=3;          % Wiener2 window size
-    p{9,1}= 'Minimum intensity';     p{9,2}=0.0;        % Minimum intensity of input image (0 = no change) 
-    p{10,1}='Maximum intensity';     p{10,2}=1.0;       % Maximum intensity on input image (1 = no change)
+    % Parameter                      % Setting             % Options
+    p{1,1}= 'ROI';                   p{1,2}=s{5,2};        % same as in PIV settings
+    p{2,1}= 'CLAHE';                 p{2,2}=1;             % 1 = enable CLAHE (contrast enhancement), 0 = disable
+    p{3,1}= 'CLAHE tile number';     p{3,2}=[8 8];         % CLAHE window size
+    p{4,1}= 'Highpass';              p{4,2}=0;             % 1 = enable highpass, 0 = disable
+    p{5,1}= 'Highpass size';         p{5,2}=15;            % highpass size
+    p{6,1}= 'Clipping';              p{6,2}=1;             % 1 = enable clipping, 0 = disable
+    p{7,1}= 'Wiener';                p{7,2}=0;             % 1 = enable Wiener2 adaptive denaoise filter, 0 = disable
+    p{8,1}= 'Wiener size';           p{8,2}=3;             % Wiener2 window size
+    p{9,1}= 'Minimum intensity';     p{9,2}=0.0;           % Minimum intensity of input image (0 = no change) 
+    p{10,1}='Maximum intensity';     p{10,2}=1.0;          % Maximum intensity on input image (1 = no change)
 
     disp('Performing PIV analysis with deforming windows and 4 passes...')
     img_move = preproc_PIV (img_move,p{1,2},p{2,2},p{3,2},p{4,2},p{5,2},p{6,2},p{7,2},p{8,2},p{9,2},p{10,2});
